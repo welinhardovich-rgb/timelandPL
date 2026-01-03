@@ -1,0 +1,66 @@
+package com.timeland.rbalance;
+
+import com.timeland.rbalance.commands.BalanceCommand;
+import com.timeland.rbalance.events.PlayerDeathListener;
+import com.timeland.rbalance.events.PlayerQuitListener;
+import com.timeland.rbalance.events.SignInteractListener;
+import com.timeland.rbalance.storage.ConfigManager;
+import com.timeland.rbalance.storage.DataManager;
+import com.timeland.rbalance.systems.*;
+import lombok.Getter;
+import org.bukkit.plugin.java.JavaPlugin;
+
+@Getter
+public class RBalancePlugin extends JavaPlugin {
+    private DataManager dataManager;
+    private ConfigManager configManager;
+    private BalanceSystem balanceSystem;
+    private CommissionSystem commissionSystem;
+    private LimitSystem limitSystem;
+    private LogSystem logSystem;
+    private TradeSignSystem tradeSignSystem;
+
+    @Override
+    public void onEnable() {
+        // Initialize managers
+        this.configManager = new ConfigManager(this);
+        this.dataManager = new DataManager(this);
+        
+        // Initialize systems
+        this.balanceSystem = new BalanceSystem(this);
+        this.commissionSystem = new CommissionSystem(this);
+        this.limitSystem = new LimitSystem(this);
+        this.logSystem = new LogSystem(this);
+        this.tradeSignSystem = new TradeSignSystem(this);
+
+        // Register commands
+        getCommand("bal").setExecutor(new BalanceCommand(this));
+
+        // Register events
+        getServer().getPluginManager().registerEvents(new SignInteractListener(this), this);
+        getServer().getPluginManager().registerEvents(new PlayerDeathListener(this), this);
+        getServer().getPluginManager().registerEvents(new PlayerQuitListener(this), this);
+
+        // Periodic save task
+        getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
+            if (dataManager != null) {
+                dataManager.save();
+            }
+        }, 6000L, 6000L); // Every 5 minutes
+
+        getLogger().info("R-Balance plugin enabled!");
+    }
+
+    @Override
+    public void onDisable() {
+        if (dataManager != null) {
+            dataManager.save();
+        }
+        getLogger().info("R-Balance plugin disabled!");
+    }
+    
+    public void reload() {
+        configManager.reload();
+        dataManager.load();
+    }
+}

@@ -1,0 +1,14 @@
+name: R-Balance
+version: 1.0.0
+main: com.timeland.rbalance.RBalancePlugin
+description: Balanced resource economy system for Timeland
+authors: [Timeland Team]
+api-version: '1.21'
+commands:
+  bal:
+    description: Balance management commands
+    usage: /bal <action> [args]
+permissions:
+  rbalance.admin:
+    description: Allow access to admin commands
+    default: op

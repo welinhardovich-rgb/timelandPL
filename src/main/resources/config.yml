@@ -1,0 +1,18 @@
+commissions:
+  deposit: 2.0        # 0-2% при депозите
+  withdraw: 3.0       # 2-5% при выводе
+  transfer: 1.0       # 1% при переводе между игроками
+
+limits:
+  daily_deposit_per_resource: 1000.0
+  min_operation_amount: 0.1
+  netherite_unlock_level: 30  # Требуемый уровень для Незерита
+  disabled_resources: []      # Ресурсы, где депозит отключён
+
+stats:
+  server_burned:
+    IRON: 0.0
+    GOLD: 0.0
+    DIAMOND: 0.0
+    NETHERITE: 0.0
+    EMERALD: 0.0
