@@ -31,8 +31,9 @@ public class LogSystem {
         }
     }
 
-    public void logTransaction(String message) {
+    public void logTransaction(org.bukkit.entity.Player player, String message) {
         log("transactions.log", message);
+        plugin.getDataManager().addHistory(player.getUniqueId(), message);
     }
 
     public void logTrade(String message) {

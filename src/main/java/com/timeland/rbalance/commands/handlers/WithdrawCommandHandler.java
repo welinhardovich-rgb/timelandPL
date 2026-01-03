@@ -6,6 +6,8 @@ import com.timeland.rbalance.utils.ItemStackUtils;
 import com.timeland.rbalance.utils.ResourceType;
 import org.bukkit.entity.Player;
 
+import java.math.BigDecimal;
+
 public class WithdrawCommandHandler {
     private final RBalancePlugin plugin;
 
@@ -25,15 +27,15 @@ public class WithdrawCommandHandler {
             return;
         }
 
-        double amount;
+        BigDecimal amount;
         try {
-            amount = Double.parseDouble(args[2]);
-        } catch (NumberFormatException e) {
+            amount = new BigDecimal(args[2]);
+        } catch (Exception e) {
             player.sendMessage("§cНекорректное количество.");
             return;
         }
 
-        if (amount <= 0) {
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
             player.sendMessage("§cКоличество должно быть больше 0.");
             return;
         }
@@ -41,23 +43,20 @@ public class WithdrawCommandHandler {
         String limitError = plugin.getLimitSystem().checkWithdraw(player, resource, amount);
         if (limitError != null) {
             player.sendMessage("§c" + limitError);
+            plugin.getBossBarSystem().showError(player, limitError);
             return;
         }
 
-        double currentBalance = plugin.getBalanceSystem().getBalance(player.getUniqueId(), resource);
-        if (currentBalance < amount) {
+        BigDecimal currentBalance = plugin.getBalanceSystem().getBalance(player.getUniqueId(), resource);
+        if (currentBalance.compareTo(amount) < 0) {
             player.sendMessage("§cНедостаточно средств на балансе.");
+            plugin.getBossBarSystem().showError(player, "INSUFFICIENT BALANCE");
             return;
         }
 
         // Apply commission
-        double commission = plugin.getCommissionSystem().calculateCommission(amount, "withdraw");
-        double toWithdraw = amount + commission; // To get 'amount', you need to pay commission on top? 
-        // Ticket: "Применить комиссию... Начислить сожженные ресурсы".
-        // Usually, if I want to withdraw 10, and commission is 3%, I might get 9.7 in hand.
-        // Let's assume withdrawing 'amount' from balance results in 'amount - commission' in inventory.
-        
-        double inHand = amount - commission;
+        BigDecimal commission = plugin.getCommissionSystem().calculateCommission(amount, "withdraw");
+        BigDecimal inHand = amount.subtract(commission);
 
         if (plugin.getBalanceSystem().withdrawBalance(player.getUniqueId(), resource, amount)) {
             ItemStackUtils.giveResources(player.getInventory(), resource, inHand);
@@ -66,8 +65,8 @@ public class WithdrawCommandHandler {
             player.sendMessage("§aВы сняли " + BalanceFormatter.format(inHand) + " " + resource.name() + ".");
             player.sendMessage("§7Комиссия: " + BalanceFormatter.format(commission) + " (" + plugin.getConfigManager().getCommission("withdraw") + "%)");
 
-            plugin.getLogSystem().logTransaction(String.format("WITHDRAW | Player: %s | Resource: %s | Amount: %s | Commission: %s | Balance: %s",
-                    player.getName(), resource.name(), BalanceFormatter.format(amount), BalanceFormatter.format(commission),
+            plugin.getLogSystem().logTransaction(player, String.format("WITHDRAW | Resource: %s | Amount: %s | Commission: %s | Balance: %s",
+                    resource.name(), BalanceFormatter.format(amount), BalanceFormatter.format(commission),
                     BalanceFormatter.format(plugin.getBalanceSystem().getBalance(player.getUniqueId(), resource))));
         }
     }

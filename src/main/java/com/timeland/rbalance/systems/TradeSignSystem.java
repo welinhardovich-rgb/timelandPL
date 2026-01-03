@@ -1,24 +1,37 @@
 package com.timeland.rbalance.systems;
 
 import com.timeland.rbalance.RBalancePlugin;
+import com.timeland.rbalance.api.events.SignTradeEvent;
 import com.timeland.rbalance.utils.BalanceFormatter;
-import com.timeland.rbalance.utils.ItemStackUtils;
 import com.timeland.rbalance.utils.ResourceType;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.block.Sign;
 import org.bukkit.entity.Player;
 
+import java.math.BigDecimal;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 public class TradeSignSystem {
     private final RBalancePlugin plugin;
+    private final Map<UUID, Long> cooldowns = new HashMap<>();
 
     public TradeSignSystem(RBalancePlugin plugin) {
         this.plugin = plugin;
     }
 
     public void handleTrade(Player player, Sign sign, boolean isBuy) {
+        // Cooldown check
+        long now = System.currentTimeMillis();
+        if (cooldowns.getOrDefault(player.getUniqueId(), 0L) > now) {
+            player.sendMessage("§cПодождите перед следующей операцией.");
+            plugin.getBossBarSystem().showError(player, "TRADE COOLDOWN");
+            return;
+        }
+        cooldowns.put(player.getUniqueId(), now + 1000L); // 1 second cooldown
+
         String[] lines = sign.getSide(org.bukkit.block.sign.Side.FRONT).getLines();
         if (!lines[0].equalsIgnoreCase("[Trade]")) return;
 
@@ -26,37 +39,24 @@ public class TradeSignSystem {
         OfflinePlayer owner = Bukkit.getOfflinePlayer(ownerName);
         if (!owner.hasPlayedBefore() && !owner.isOnline()) {
             player.sendMessage("§cВладелец таблички не найден.");
+            plugin.getBossBarSystem().showError(player, "OWNER NOT FOUND");
             return;
         }
 
-        // Chunk ownership check placeholder
-        // In a real server, you would integrate with WorldGuard or GriefPrevention here.
-        // For example: if (!ClaimUtils.isOwner(owner, sign.getLocation())) return;
-
-        String resLine = lines[2]; // e.g. "IRON x10" or "10 IRON"
+        // Parse resource and amount
+        String resLine = lines[2]; // e.g. "IRON x10"
         String[] resParts = resLine.split(" x");
         if (resParts.length < 2) {
-            resParts = resLine.split(" ");
-        }
-        
-        if (resParts.length < 2) {
-            player.sendMessage("§cНекорректный формат ресурсов на табличке.");
+            player.sendMessage("§cНекорректный формат ресурсов: <Resource> x<Amount>");
             return;
         }
 
-        double amount;
-        ResourceType resource;
+        ResourceType resource = ResourceType.fromString(resParts[0]);
+        BigDecimal amount;
         try {
-            // Support both "IRON x10" and "10 IRON"
-            if (resParts[0].matches(".*\\d+.*")) {
-                 amount = Double.parseDouble(resParts[0].replaceAll("[^0-9.]", ""));
-                 resource = ResourceType.fromString(resParts[1]);
-            } else {
-                 resource = ResourceType.fromString(resParts[0]);
-                 amount = Double.parseDouble(resParts[1].replaceAll("[^0-9.]", ""));
-            }
+            amount = new BigDecimal(resParts[1]);
         } catch (Exception e) {
-            player.sendMessage("§cОшибка чтения ресурсов на табличке.");
+            player.sendMessage("§cНекорректное количество на табличке.");
             return;
         }
 
@@ -65,166 +65,165 @@ public class TradeSignSystem {
             return;
         }
 
-        String priceLine = lines[3]; // S:10 / B:12
-        double sellPrice = -1;
-        double buyPrice = -1;
+        // Parse prices
+        String priceLine = lines[3]; // S:4I / B:5I
+        BigDecimal sellPrice = null;
+        ResourceType sellResourceType = null;
+        BigDecimal buyPrice = null;
+        ResourceType buyResourceType = null;
 
         String[] prices = priceLine.split("/");
         for (String p : prices) {
             p = p.trim();
             if (p.startsWith("S:")) {
-                sellPrice = Double.parseDouble(p.substring(2).trim());
+                String val = p.substring(2).trim();
+                sellResourceType = parseSuffix(val);
+                sellPrice = parseValue(val);
             } else if (p.startsWith("B:")) {
-                buyPrice = Double.parseDouble(p.substring(2).trim());
+                String val = p.substring(2).trim();
+                buyResourceType = parseSuffix(val);
+                buyPrice = parseValue(val);
             }
         }
 
         if (isBuy) {
-            if (buyPrice < 0) {
-                player.sendMessage("§cЭта табличка не поддерживает покупку.");
+            if (sellPrice == null) {
+                player.sendMessage("§cЭта табличка не поддерживает покупку (S:).");
                 return;
             }
-            processBuy(player, owner, resource, amount, buyPrice);
+            processTrade(player, owner, resource, amount, sellPrice, sellResourceType, true);
         } else {
-            if (sellPrice < 0) {
-                player.sendMessage("§cЭта табличка не поддерживает продажу.");
+            if (buyPrice == null) {
+                player.sendMessage("§cЭта табличка не поддерживает продажу (B:).");
                 return;
             }
-            processSell(player, owner, resource, amount, sellPrice);
+            processTrade(player, owner, resource, amount, buyPrice, buyResourceType, false);
         }
     }
 
-    private void processBuy(Player player, OfflinePlayer owner, ResourceType resource, double amount, double price) {
-        // Player buys from Owner
-        // Player pays 'price' of 'resource'? 
-        // Wait, "S:{ЦЕНА} / B:{ЦЕНА}" usually refers to a main currency.
-        // But here resources ARE the currency.
-        // "S:{ЦЕНА} / B:{ЦЕНА}" probably means price in some base resource or it's a cross-resource trade?
-        // Actually, the ticket says "Ресурсы с 1:1 соответствием".
-        // Maybe the price is in another resource? No, that's complex.
-        // Most likely, price is in THE SAME resource, which makes no sense for 1:1.
-        // OR, the sign is for trading items for balance.
-        // "Ресурсы списываются/начисляются автоматически"
-        // Let's assume the sign allows buying 'amount' of 'resource' for 'price' of THE SAME resource? No.
-        // Maybe it's for trading DIFFERENT resources?
-        // "S:10 / B:12" for "10 IRON" -> Buy 10 IRON for 12 ... what?
-        // Ah! Usually, in such plugins, there's a primary currency or it's a trade sign for items.
-        // But here items ARE the balance.
-        // Let's assume Price is in a "Virtual Currency" which is represented by these coins?
-        // But we have 5 different coins.
-        // I will assume the Price is in the SAME resource, which means it's a way to trade balance.
-        // No, that's also weird.
-        // Let's re-read: "АФК-ТОРГОВЛЯ ЧЕРЕЗ ТАБЛИЧКИ... Ресурсы списываются/начисляются автоматически".
-        // Probably: Sign sells 'amount' of 'resource' (from owner's balance) to player (to player's inventory) 
-        // for some price (from player's balance to owner's balance).
-        // But what resource is the price?
-        // Maybe there's a default resource for prices? Iron?
-        // Or maybe the sign is for items in chest? "АФК-торговля" often implies signs on chests.
-        // But "Ресурсы списываются/начисляются автоматически" and "Продавец может быть АФК или оффлайн" 
-        // and "баланс продавца < требуемая сумма" suggests it uses BALANCE.
-        
-        // I'll assume Price is always in the SAME resource type for simplicity, or it's a way to exchange resources?
-        // Wait! "баланс продавца < требуемая сумма". 
-        // If I'm buying from the sign, the OWNER is the seller.
-        // If the owner's balance is low, they can't sell.
-        
-        // Let's assume the price is in DIAMOND coins by default if not specified, 
-        // or just the same resource (which is useless).
-        // Actually, let's assume the price is in the SAME resource, 
-        // but the sign is used to exchange Physical items for Balance? No, that's deposit/withdraw.
-        
-        // Maybe it's a way for players to set up their own exchange rates between resources?
-        // Example: Sign says "10 GOLD", "S:5 / B:6" where price is in DIAMONDS?
-        // This is getting complicated.
-        
-        // Let's go with the most likely intent:
-        // The sign trades Physical Resources (in hand/inventory) for Balance, or vice versa?
-        // "Механика: Ходит на табличку (ПКМ) → покупка/продажа"
-        // "Ресурсы списываются/начисляются автоматически"
-        
-        // Let's assume:
-        // Buy: Player pays 'price' (from balance) to Owner, Player receives 'amount' (in inventory).
-        // Sell: Player gives 'amount' (from inventory) to sign, Player receives 'price' (to balance) from Owner.
-        // The 'price' and 'amount' are of the SAME resource type specified on the sign.
-        // Wait, if it's the same resource type, it's just a way to withdraw/deposit at a different rate?
-        // That doesn't make sense.
-        
-        // Re-read again: "Ресурсы с 1:1 соответствием".
-        // "Железо (I) - Iron Coin ... Поддерживать дробные значения".
-        
-        // Maybe the Price is in a "Standard Currency"? But there is no standard currency, just 5 types of coins.
-        // I will assume the sign is for trading PHYSICAL items of {RESOURCE} for BALANCE of {RESOURCE}.
-        // But that's just /bal deposit/withdraw.
-        
-        // Wait! "баланс продавца < требуемая сумма". 
-        // This MUST mean the transaction involves balance on both sides, or at least the seller's side.
-        
-        // Let's assume the sign is for trading between DIFFERENT players.
-        // Sign: [Trade], Owner, 10 IRON, S:2 / B:3.
-        // This means:
-        // I Buy 10 IRON (Physical) for 3 IRON (Balance)? No.
-        // I think it's:
-        // Buy: I get 10 IRON (Physical) and pay 3 IRON (Balance) to owner. (Owner must have 10 IRON on balance)
-        // Sell: I give 10 IRON (Physical) and get 2 IRON (Balance) from owner. (Owner must have 2 IRON on balance)
-        
-        // This way, the sign owner provides a physical-to-balance exchange service.
-        
-        if (plugin.getBalanceSystem().getBalance(owner.getUniqueId(), resource) < amount) {
-            player.sendMessage("§cУ владельца недостаточно " + resource.name() + " на балансе.");
-            return;
-        }
+    private ResourceType parseSuffix(String input) {
+        if (input.isEmpty()) return null;
+        String suffix = input.substring(input.length() - 1);
+        return ResourceType.fromString(suffix);
+    }
 
-        double playerBalance = plugin.getBalanceSystem().getBalance(player.getUniqueId(), resource);
-        if (playerBalance < price) {
-            player.sendMessage("§cУ вас недостаточно " + resource.name() + " на балансе для оплаты цены.");
-            return;
-        }
-
-        // Execute Buy
-        if (plugin.getBalanceSystem().withdrawBalance(owner.getUniqueId(), resource, amount)) {
-            if (plugin.getBalanceSystem().withdrawBalance(player.getUniqueId(), resource, price)) {
-                plugin.getBalanceSystem().addBalance(owner.getUniqueId(), resource, price);
-                ItemStackUtils.giveResources(player.getInventory(), resource, amount);
-                
-                player.sendMessage("§aВы купили " + amount + " " + resource.name() + " за " + price + " (баланс).");
-                plugin.getLogSystem().logTrade(String.format("TRADE BUY | Player: %s | Owner: %s | Resource: %s | Amount: %s | Price: %s",
-                        player.getName(), owner.getName(), resource.name(), amount, price));
-            } else {
-                // Refund owner if player couldn't pay (shouldn't happen with check above)
-                plugin.getBalanceSystem().addBalance(owner.getUniqueId(), resource, amount);
-            }
+    private BigDecimal parseValue(String input) {
+        if (input.isEmpty()) return null;
+        try {
+            return new BigDecimal(input.substring(0, input.length() - 1));
+        } catch (Exception e) {
+            return null;
         }
     }
 
-    private void processSell(Player player, OfflinePlayer owner, ResourceType resource, double amount, double price) {
-        // Player Sells to Owner
-        // Player gives 'amount' (Physical), Player receives 'price' (Balance) from Owner.
+    private void processTrade(Player trader, OfflinePlayer owner, ResourceType tradeRes, BigDecimal tradeAmount, 
+                              BigDecimal price, ResourceType priceRes, boolean isTraderBuying) {
         
-        double ownerBalance = plugin.getBalanceSystem().getBalance(owner.getUniqueId(), resource);
-        if (ownerBalance < price) {
-            player.sendMessage("§cУ владельца недостаточно " + resource.name() + " на балансе для покупки.");
+        if (priceRes == null) {
+            trader.sendMessage("§cНекорREктный формат цены на табличке.");
             return;
         }
 
-        double available = ItemStackUtils.countResources(player.getInventory(), resource);
-        if (available < amount) {
-            player.sendMessage("§cУ вас недостаточно физического ресурса " + resource.name() + ".");
-            return;
-        }
+        SignTradeEvent event = new SignTradeEvent(trader, owner.getUniqueId(), tradeRes, tradeAmount, price, priceRes, isTraderBuying);
+        Bukkit.getPluginManager().callEvent(event);
+        if (event.isCancelled()) return;
 
-        // Execute Sell
-        if (plugin.getBalanceSystem().withdrawBalance(owner.getUniqueId(), resource, price)) {
-            if (ItemStackUtils.removeResources(player.getInventory(), resource, amount)) {
-                plugin.getBalanceSystem().addBalance(player.getUniqueId(), resource, price);
-                
-                player.sendMessage("§aВы продали " + amount + " " + resource.name() + " за " + price + " (баланс).");
-                plugin.getLogSystem().logTrade(String.format("TRADE SELL | Player: %s | Owner: %s | Resource: %s | Amount: %s | Price: %s",
-                        player.getName(), owner.getName(), resource.name(), amount, price));
-            } else {
-                // Refund owner if resources couldn't be removed
-                plugin.getBalanceSystem().addBalance(owner.getUniqueId(), resource, price);
-                player.sendMessage("§cНе удалось списать ресурсы из вашего инвентаря.");
+        UUID traderUuid = trader.getUniqueId();
+        UUID ownerUuid = owner.getUniqueId();
+
+        if (isTraderBuying) {
+            // Trader buys from owner.
+            // Trader pays 'price' of 'priceRes' to owner.
+            // Owner gives 'tradeAmount' of 'tradeRes' to trader.
+            
+            if (plugin.getBalanceSystem().getBalance(ownerUuid, tradeRes).compareTo(tradeAmount) < 0) {
+                trader.sendMessage("§cУ владельца недостаточно " + tradeRes.name() + " на балансе.");
+                plugin.getBossBarSystem().showError(trader, "OWNER OUT OF STOCK");
+                return;
+            }
+            if (plugin.getBalanceSystem().getBalance(traderUuid, priceRes).compareTo(price) < 0) {
+                trader.sendMessage("§cУ вас недостаточно " + priceRes.name() + " на балансе.");
+                plugin.getBossBarSystem().showError(trader, "INSUFFICIENT BALANCE");
+                return;
+            }
+
+            // Execute
+            if (plugin.getBalanceSystem().withdrawBalance(ownerUuid, tradeRes, tradeAmount)) {
+                if (plugin.getBalanceSystem().withdrawBalance(traderUuid, priceRes, price)) {
+                    BigDecimal tax = price.multiply(BigDecimal.valueOf(plugin.getConfig().getDouble("commissions.sign_tax", 1.0)))
+                            .divide(BigDecimal.valueOf(100.0), 2, java.math.RoundingMode.HALF_UP);
+                    BigDecimal toOwner = price.subtract(tax);
+                    
+                    plugin.getBalanceSystem().addBalance(ownerUuid, priceRes, toOwner);
+                    plugin.getBalanceSystem().addBalance(traderUuid, tradeRes, tradeAmount);
+                    plugin.getCommissionSystem().applyBurn(priceRes, tax);
+                    
+                    trader.sendMessage("§aВы купили " + tradeAmount + " " + tradeRes.name() + " за " + price + " " + priceRes.name() + ".");
+                    if (tax.compareTo(BigDecimal.ZERO) > 0) trader.sendMessage("§7(Налог: " + tax + " " + priceRes.getSuffix() + ")");
+                } else {
+                    plugin.getBalanceSystem().addBalance(ownerUuid, tradeRes, tradeAmount); // refund
+                }
+            }
+        } else {
+            // Trader sells to owner.
+            // Trader gives 'tradeAmount' of 'tradeRes' to owner.
+            // Owner pays 'price' of 'priceRes' to trader.
+            
+            if (plugin.getBalanceSystem().getBalance(traderUuid, tradeRes).compareTo(tradeAmount) < 0) {
+                trader.sendMessage("§cУ вас недостаточно " + tradeRes.name() + " на балансе.");
+                plugin.getBossBarSystem().showError(trader, "INSUFFICIENT BALANCE");
+                return;
+            }
+            if (plugin.getBalanceSystem().getBalance(ownerUuid, priceRes).compareTo(price) < 0) {
+                trader.sendMessage("§cУ владельца недостаточно " + priceRes.name() + " для покупки.");
+                plugin.getBossBarSystem().showError(trader, "OWNER OUT OF BALANCE");
+                return;
+            }
+
+            // Execute
+            if (plugin.getBalanceSystem().withdrawBalance(traderUuid, tradeRes, tradeAmount)) {
+                if (plugin.getBalanceSystem().withdrawBalance(ownerUuid, priceRes, price)) {
+                    BigDecimal tax = price.multiply(BigDecimal.valueOf(plugin.getConfig().getDouble("commissions.sign_tax", 1.0)))
+                            .divide(BigDecimal.valueOf(100.0), 2, java.math.RoundingMode.HALF_UP);
+                    BigDecimal toTrader = price.subtract(tax);
+
+                    plugin.getBalanceSystem().addBalance(traderUuid, priceRes, toTrader);
+                    plugin.getBalanceSystem().addBalance(ownerUuid, tradeRes, tradeAmount);
+                    plugin.getCommissionSystem().applyBurn(priceRes, tax);
+                    
+                    trader.sendMessage("§aВы продали " + tradeAmount + " " + tradeRes.name() + " за " + price + " " + priceRes.name() + ".");
+                    if (tax.compareTo(BigDecimal.ZERO) > 0) trader.sendMessage("§7(Налог: " + tax + " " + priceRes.getSuffix() + ")");
+                } else {
+                    plugin.getBalanceSystem().addBalance(traderUuid, tradeRes, tradeAmount); // refund
+                }
             }
         }
+        updateSignState(sign);
+    }
+
+    public void updateSignState(Sign sign) {
+        String[] lines = sign.getSide(org.bukkit.block.sign.Side.FRONT).getLines();
+        String ownerName = lines[1];
+        OfflinePlayer owner = Bukkit.getOfflinePlayer(ownerName);
+        
+        String resLine = lines[2];
+        String[] resParts = resLine.split(" x");
+        if (resParts.length < 2) return;
+        ResourceType resource = ResourceType.fromString(resParts[0]);
+        BigDecimal amount;
+        try { amount = new BigDecimal(resParts[1]); } catch (Exception e) { return; }
+        if (resource == null) return;
+
+        BigDecimal ownerTradeBal = plugin.getBalanceSystem().getBalance(owner.getUniqueId(), resource);
+        
+        String state;
+        if (ownerTradeBal.compareTo(amount) < 0) {
+            state = "§c[OUT OF STOCK]";
+        } else {
+            state = "§a[Trade]";
+        }
+        
+        sign.getSide(org.bukkit.block.sign.Side.FRONT).setLine(0, state);
+        sign.update();
     }
 }

@@ -3,6 +3,8 @@ package com.timeland.rbalance.systems;
 import com.timeland.rbalance.RBalancePlugin;
 import com.timeland.rbalance.utils.ResourceType;
 
+import java.math.BigDecimal;
+
 public class CommissionSystem {
     private final RBalancePlugin plugin;
 
@@ -10,17 +12,18 @@ public class CommissionSystem {
         this.plugin = plugin;
     }
 
-    public double calculateCommission(double amount, String type) {
+    public BigDecimal calculateCommission(BigDecimal amount, String type) {
         double rate = plugin.getConfigManager().getCommission(type);
-        return amount * (rate / 100.0);
+        return amount.multiply(BigDecimal.valueOf(rate)).divide(BigDecimal.valueOf(100.0), 2, java.math.RoundingMode.HALF_UP);
     }
 
-    public void applyBurn(ResourceType resource, double burnedAmount) {
-        if (burnedAmount <= 0) return;
+    public void applyBurn(ResourceType resource, BigDecimal burnedAmount) {
+        if (burnedAmount.compareTo(BigDecimal.ZERO) <= 0) return;
         
         String path = "stats.server_burned." + resource.name();
-        double current = plugin.getConfig().getDouble(path, 0.0);
-        plugin.getConfig().set(path, current + burnedAmount);
+        String currentStr = plugin.getConfig().getString(path, "0.0");
+        BigDecimal current = new BigDecimal(currentStr);
+        plugin.getConfig().set(path, current.add(burnedAmount).toString());
         plugin.saveConfig();
     }
 }

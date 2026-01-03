@@ -6,6 +6,8 @@ import com.timeland.rbalance.utils.ItemStackUtils;
 import com.timeland.rbalance.utils.ResourceType;
 import org.bukkit.entity.Player;
 
+import java.math.BigDecimal;
+
 public class DepositCommandHandler {
     private final RBalancePlugin plugin;
 
@@ -25,15 +27,15 @@ public class DepositCommandHandler {
             return;
         }
 
-        double amount;
+        BigDecimal amount;
         try {
-            amount = Double.parseDouble(args[2]);
-        } catch (NumberFormatException e) {
+            amount = new BigDecimal(args[2]);
+        } catch (Exception e) {
             player.sendMessage("§cНекорректное количество.");
             return;
         }
 
-        if (amount <= 0) {
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
             player.sendMessage("§cКоличество должно быть больше 0.");
             return;
         }
@@ -41,18 +43,21 @@ public class DepositCommandHandler {
         String limitError = plugin.getLimitSystem().checkDeposit(player, resource, amount);
         if (limitError != null) {
             player.sendMessage("§c" + limitError);
+            plugin.getBossBarSystem().showError(player, limitError);
             return;
         }
 
-        double available = ItemStackUtils.countResources(player.getInventory(), resource);
-        if (available < amount) {
-            player.sendMessage("§cУ вас недостаточно ресурсов (доступно: " + BalanceFormatter.format(available) + ").");
+        BigDecimal available = ItemStackUtils.countResources(player.getInventory(), resource);
+        if (available.compareTo(amount) < 0) {
+            String error = "У вас недостаточно ресурсов (доступно: " + BalanceFormatter.format(available) + ").";
+            player.sendMessage("§c" + error);
+            plugin.getBossBarSystem().showError(player, "INSUFFICIENT RESOURCES");
             return;
         }
 
         // Apply commission
-        double commission = plugin.getCommissionSystem().calculateCommission(amount, "deposit");
-        double toAdd = amount - commission;
+        BigDecimal commission = plugin.getCommissionSystem().calculateCommission(amount, "deposit");
+        BigDecimal toAdd = amount.subtract(commission);
 
         // Process
         if (!ItemStackUtils.removeResources(player.getInventory(), resource, amount)) {
@@ -68,8 +73,8 @@ public class DepositCommandHandler {
         player.sendMessage("§7Комиссия: " + BalanceFormatter.format(commission) + " (" + plugin.getConfigManager().getCommission("deposit") + "%)");
         player.sendMessage("§7Зачислено: " + BalanceFormatter.format(toAdd));
 
-        plugin.getLogSystem().logTransaction(String.format("DEPOSIT | Player: %s | Resource: %s | Amount: %s | Commission: %s | Balance: %s",
-                player.getName(), resource.name(), BalanceFormatter.format(amount), BalanceFormatter.format(commission), 
+        plugin.getLogSystem().logTransaction(player, String.format("DEPOSIT | Resource: %s | Amount: %s | Commission: %s | Balance: %s",
+                resource.name(), BalanceFormatter.format(amount), BalanceFormatter.format(commission), 
                 BalanceFormatter.format(plugin.getBalanceSystem().getBalance(player.getUniqueId(), resource))));
     }
 }

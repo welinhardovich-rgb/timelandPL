@@ -7,7 +7,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 
-import java.util.UUID;
+import java.math.BigDecimal;
 
 public class PayCommandHandler {
     private final RBalancePlugin plugin;
@@ -29,15 +29,15 @@ public class PayCommandHandler {
             return;
         }
 
-        double amount;
+        BigDecimal amount;
         try {
-            amount = Double.parseDouble(args[3]);
-        } catch (NumberFormatException e) {
+            amount = new BigDecimal(args[3]);
+        } catch (Exception e) {
             player.sendMessage("§cНекорректное количество.");
             return;
         }
 
-        if (amount <= plugin.getConfigManager().getMinOperationAmount()) {
+        if (amount.compareTo(BigDecimal.valueOf(plugin.getConfigManager().getMinOperationAmount())) < 0) {
             player.sendMessage("§cМинимальная сумма: " + plugin.getConfigManager().getMinOperationAmount());
             return;
         }
@@ -53,14 +53,15 @@ public class PayCommandHandler {
             return;
         }
 
-        double currentBalance = plugin.getBalanceSystem().getBalance(player.getUniqueId(), resource);
-        if (currentBalance < amount) {
+        BigDecimal currentBalance = plugin.getBalanceSystem().getBalance(player.getUniqueId(), resource);
+        if (currentBalance.compareTo(amount) < 0) {
             player.sendMessage("§cНедостаточно средств.");
+            plugin.getBossBarSystem().showError(player, "INSUFFICIENT BALANCE");
             return;
         }
 
-        double commission = plugin.getCommissionSystem().calculateCommission(amount, "transfer");
-        double toAdd = amount - commission;
+        BigDecimal commission = plugin.getCommissionSystem().calculateCommission(amount, "transfer");
+        BigDecimal toAdd = amount.subtract(commission);
 
         if (plugin.getBalanceSystem().withdrawBalance(player.getUniqueId(), resource, amount)) {
             plugin.getBalanceSystem().addBalance(target.getUniqueId(), resource, toAdd);
@@ -70,11 +71,13 @@ public class PayCommandHandler {
             player.sendMessage("§7Комиссия: " + BalanceFormatter.format(commission));
             
             if (target.isOnline()) {
-                ((Player) target).sendMessage("§aВы получили " + BalanceFormatter.format(toAdd) + " " + resource.name() + " от " + player.getName() + ".");
+                Player targetPlayer = (Player) target;
+                targetPlayer.sendMessage("§aВы получили " + BalanceFormatter.format(toAdd) + " " + resource.name() + " от " + player.getName() + ".");
+                plugin.getBossBarSystem().showBalance(targetPlayer);
             }
 
-            plugin.getLogSystem().logTransaction(String.format("PAY | From: %s | To: %s | Resource: %s | Amount: %s | Commission: %s",
-                    player.getName(), targetName, resource.name(), BalanceFormatter.format(amount), BalanceFormatter.format(commission)));
+            plugin.getLogSystem().logTransaction(player, String.format("PAY | To: %s | Resource: %s | Amount: %s | Commission: %s",
+                    targetName, resource.name(), BalanceFormatter.format(amount), BalanceFormatter.format(commission)));
         }
     }
 }

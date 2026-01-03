@@ -14,17 +14,20 @@ import org.bukkit.plugin.java.JavaPlugin;
 public class RBalancePlugin extends JavaPlugin {
     private DataManager dataManager;
     private ConfigManager configManager;
+    private SignManager signManager;
     private BalanceSystem balanceSystem;
     private CommissionSystem commissionSystem;
     private LimitSystem limitSystem;
     private LogSystem logSystem;
     private TradeSignSystem tradeSignSystem;
+    private BossBarSystem bossBarSystem;
 
     @Override
     public void onEnable() {
         // Initialize managers
         this.configManager = new ConfigManager(this);
         this.dataManager = new DataManager(this);
+        this.signManager = new SignManager(this);
         
         // Initialize systems
         this.balanceSystem = new BalanceSystem(this);
@@ -32,20 +35,24 @@ public class RBalancePlugin extends JavaPlugin {
         this.limitSystem = new LimitSystem(this);
         this.logSystem = new LogSystem(this);
         this.tradeSignSystem = new TradeSignSystem(this);
+        this.bossBarSystem = new BossBarSystem(this);
 
         // Register commands
-        getCommand("bal").setExecutor(new BalanceCommand(this));
+        BalanceCommand balanceCommand = new BalanceCommand(this);
+        getCommand("bal").setExecutor(balanceCommand);
+        getCommand("bal").setTabCompleter(balanceCommand);
 
         // Register events
         getServer().getPluginManager().registerEvents(new SignInteractListener(this), this);
         getServer().getPluginManager().registerEvents(new PlayerDeathListener(this), this);
         getServer().getPluginManager().registerEvents(new PlayerQuitListener(this), this);
+        getServer().getPluginManager().registerEvents(new EconomyListener(this), this);
+        getServer().getPluginManager().registerEvents(new SignProtectionListener(this), this);
 
         // Periodic save task
         getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
-            if (dataManager != null) {
-                dataManager.save();
-            }
+            if (dataManager != null) dataManager.save();
+            if (signManager != null) signManager.save();
         }, 6000L, 6000L); // Every 5 minutes
 
         getLogger().info("R-Balance plugin enabled!");
@@ -53,9 +60,8 @@ public class RBalancePlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        if (dataManager != null) {
-            dataManager.save();
-        }
+        if (dataManager != null) dataManager.save();
+        if (signManager != null) signManager.save();
         getLogger().info("R-Balance plugin disabled!");
     }
     

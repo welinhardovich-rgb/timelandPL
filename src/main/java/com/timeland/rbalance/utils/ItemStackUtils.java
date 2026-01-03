@@ -4,40 +4,43 @@ import org.bukkit.Material;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Map;
 
 public class ItemStackUtils {
 
-    public static double countResources(Inventory inventory, ResourceType type) {
-        double total = 0;
-        Map<Material, Double> values = type.getValues();
+    public static BigDecimal countResources(Inventory inventory, ResourceType type) {
+        BigDecimal total = BigDecimal.ZERO;
+        Map<Material, BigDecimal> values = type.getValues();
         for (ItemStack item : inventory.getContents()) {
             if (item == null || item.getType().isAir()) continue;
             if (values.containsKey(item.getType())) {
-                total += item.getAmount() * values.get(item.getType());
+                total = total.add(BigDecimal.valueOf(item.getAmount()).multiply(values.get(item.getType())));
             }
         }
         return total;
     }
 
-    public static boolean removeResources(Inventory inventory, ResourceType type, double amount) {
-        double available = countResources(inventory, type);
-        if (available < amount - 0.0001) return false;
+    public static boolean removeResources(Inventory inventory, ResourceType type, BigDecimal amount) {
+        BigDecimal available = countResources(inventory, type);
+        if (available.compareTo(amount) < 0) return false;
 
-        double remaining = amount;
-        Map<Material, Double> values = type.getValues();
+        BigDecimal remaining = amount;
+        Map<Material, BigDecimal> values = type.getValues();
         Material[] order = {type.getBlock(), type.getIngot(), type.getNugget()};
         
-        // First pass: try to remove as much as possible using whole items
         for (Material material : order) {
             if (material == null) continue;
-            double value = values.get(material);
+            BigDecimal value = values.get(material);
             for (int i = 0; i < inventory.getSize(); i++) {
+                if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
                 ItemStack item = inventory.getItem(i);
                 if (item == null || item.getType() != material) continue;
                 
                 int itemAmount = item.getAmount();
-                int toRemove = (int) Math.min(itemAmount, Math.floor(remaining / value + 0.0001));
+                int toRemove = remaining.divide(value, 0, RoundingMode.FLOOR).intValue();
+                toRemove = Math.min(itemAmount, toRemove);
                 
                 if (toRemove > 0) {
                     if (toRemove == itemAmount) {
@@ -45,44 +48,41 @@ public class ItemStackUtils {
                     } else {
                         item.setAmount(itemAmount - toRemove);
                     }
-                    remaining -= toRemove * value;
+                    remaining = remaining.subtract(BigDecimal.valueOf(toRemove).multiply(value));
                 }
             }
         }
         
-        return remaining < 0.0001;
+        return remaining.compareTo(BigDecimal.ZERO) <= 0;
     }
 
-    public static void giveResources(Inventory inventory, ResourceType type, double amount) {
-        double remaining = amount;
+    public static void giveResources(Inventory inventory, ResourceType type, BigDecimal amount) {
+        BigDecimal remaining = amount;
 
         // Give blocks
         if (type.getBlock() != null) {
-            int blocks = (int) Math.floor(remaining / 9.0 + 0.0001);
+            int blocks = remaining.divide(BigDecimal.valueOf(9.0), 0, RoundingMode.FLOOR).intValue();
             if (blocks > 0) {
                 inventory.addItem(new ItemStack(type.getBlock(), blocks));
-                remaining -= blocks * 9.0;
+                remaining = remaining.subtract(BigDecimal.valueOf(blocks).multiply(BigDecimal.valueOf(9.0)));
             }
         }
 
         // Give ingots
         if (type.getIngot() != null) {
-            int ingots = (int) Math.floor(remaining / 1.0 + 0.0001);
+            int ingots = remaining.divide(BigDecimal.valueOf(1.0), 0, RoundingMode.FLOOR).intValue();
             if (ingots > 0) {
                 inventory.addItem(new ItemStack(type.getIngot(), ingots));
-                remaining -= ingots * 1.0;
+                remaining = remaining.subtract(BigDecimal.valueOf(ingots).multiply(BigDecimal.valueOf(1.0)));
             }
         }
 
         // Give nuggets
         if (type.getNugget() != null) {
-            int nuggets = (int) Math.round(remaining / 0.1);
+            int nuggets = remaining.divide(BigDecimal.valueOf(0.1), 0, RoundingMode.HALF_UP).intValue();
             if (nuggets > 0) {
                 inventory.addItem(new ItemStack(type.getNugget(), nuggets));
             }
-        } else if (remaining > 0.0001 && type.getIngot() != null) {
-            // If no nuggets, round up to 1 ingot? No, that's unfair.
-            // Just leave the remainder if it's too small and no nugget exists.
         }
     }
 }
