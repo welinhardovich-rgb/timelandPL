@@ -6,3 +6,12 @@ target/
 .classpath
 logs/
 *.log
+
+# Allow website files
+!index.html
+!styles.css
+!script.js
+!README_WEBSITE.md
+
+# Local server logs
+server.log
